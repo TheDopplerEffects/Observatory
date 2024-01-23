@@ -130,6 +130,6 @@ if __name__ == '__main__':
             detections[fd] = {}
             detections[fd]['measurement'] = None
             detections[fd]['image'] = image
-        cv.imwrite(f'images/{fd}',image)
+        # cv.imwrite(f'images/{fd}',image)
 
     evaluate(detections,gt)

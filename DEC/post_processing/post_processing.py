@@ -8,6 +8,7 @@ from post_processing.error_checking import *
 from config.config import *
 from post_processing.utils import *
 from pprint import pprint
+
 def post_process_boxes(boxes,boundary,conf=0.6):
     """
     Post Processing for Detected BBoxes
@@ -68,8 +69,12 @@ def split_image(img,numeral_positions,save_thresh=False,fd=None):
     # Filter, Threshold and Houghlines
     edge_map = cv.Sobel(cropped_img,cv.CV_8U,0,1,ksize=VS_KERNEL)
     _ , yThresh = cv.threshold(cv.GaussianBlur(edge_map,TH_YKERNEL,0),0,255,cv.THRESH_BINARY + cv.THRESH_OTSU)
+
+    if save_thresh:
+        cv.imwrite(fd,yThresh)
+        
     yLines = cv.HoughLines(yThresh, SEGMENT_RHO_RES, SEGMENT_THETA_RES, SEGMENT_VOTE_RES, None, 0, 0, np.pi/2 - YTOL, np.pi/2 + YTOL)
-    
+
     assert yLines is not None, 'Image Split Error: No Boundary Lines Detected'
 
     theta_sum = 0
@@ -89,8 +94,7 @@ def split_image(img,numeral_positions,save_thresh=False,fd=None):
     m = -(math.cos(theta_offset)/math.sin(theta_offset))
     b = (rho_offset/math.sin(theta_offset))
     center = round(img.shape[1]//2 * m + b)
-    
-    boundary_edge = round(b + coarse_pos)
+    boundary_edge = round(center + coarse_pos)
     boundary_line = [m,b + coarse_pos]
     
     return img[coarse_pos:boundary_edge],img[boundary_edge:fine_pos],boundary_line
@@ -109,94 +113,47 @@ def get_minutes(cls_ids,i):
     elif cls_ids[i] == 4:
         return 0
 
-def get_coarse_line_positions(boxes,image_dims):
+def get_coarse_line_positions(boxes):
     """
     Determines Quarter Tick Line Positions and Labels using Coarse Bounding Boxes
     :param boxes: Coarse Scale Bounding Boxes, [x1,y1,x2,y2,score,cls_id]
     :param image_dims: Original Grayscale Image Dimensions
     :returns: Approximate Quarter Tick Positions and Labels -> tensor([x]), tensor([hours,mins])
     """
-    center = (round(image_dims[1]/2),round(image_dims[0]/2))
-    roman = None
-    # Find Roman Numeral Closest to center of image
-    for box in boxes:
-        if is_roman(int(box[5].item())):
-            if roman is None:
-                roman = box
-            else:
-                distance_1 = abs(center[0] - (roman[0] + (roman[2]-roman[0])/2))
-                distance_2 = abs(center[0] - (box[0] + (box[2]-box[0])/2))
-                if distance_2 > distance_1:
-                    roman = box
-    assert roman is not None, 'Detection Error: No Roman Numeral Found'
-    hour_label = NUMERAL_LUT[class_names[int(roman[5].item())]]
-    hour_position = (roman[0] + (roman[2]-roman[0])/2)
-    
-    line_labels = None
     line_positions = None
-    for i in range(len(boxes)):
-        if i != len(boxes) - 1:
-            center = boxes[i,0] + (boxes[i,2] - boxes[i,0])/2
-            next_center = boxes[i + 1,0] + (boxes[i+1,2] - boxes[i+1,0])/2
-            difference = next_center - center
-            
-            if center > hour_position:
-                if hour_label == 0:
-                    hour = 23
-                else:
-                    hour = hour_label - 1
-                hour_calc = hour
-            elif center == hour_position:
-                hour = hour_label
-                if hour_label == 0:
-                    hour_calc = 23
-                else:
-                    hour_calc = hour_label - 1
-            else:
-                hour = hour_label
-                hour_calc = hour
+    line_labels = None
+    for i in range(len(boxes[:-1])):
+        curr_box = boxes[i]
+        curr_value = NUMERAL_LUT[class_names[curr_box[5]]]
 
-            if is_roman(int(boxes[i][5].item())):
-                min = 0
-                min_calc = 60
-            else:
-                min = NUMERAL_LUT[class_names[int(boxes[i][5].item())]]
-                min_calc = min
-                
+        next_box = boxes[i + 1]
+        next_value = NUMERAL_LUT[class_names[next_box[5]]]
+
+        position_delta = (next_box[0] + (next_box[2] - next_box[0])/2) - (curr_box[0] + (curr_box[2] - curr_box[0])/2)
+        value_delta = next_value - curr_value
+        x = (curr_box[0] + (curr_box[2] - curr_box[0])/2)
+        
+        dX = position_delta/5
+        dV = value_delta/5
+
+        for i in range(5):
+            position = t.tensor([x + i*dX])
+            label = t.tensor([curr_value + i*dV])
             if line_positions is None:
-                line_positions = t.tensor([center])
+                line_positions = position
             else:
-                line_positions = t.cat((line_positions,t.tensor([center])),axis=0)
-
+                line_positions = t.cat((line_positions,position))
             if line_labels is None:
-                line_labels = t.tensor([[hour,min]])
+                line_labels = label
             else:
-                line_labels = t.cat((line_labels,t.tensor([[hour,min]])),axis=0)
-            
-            for j in range(1,4):
-                line_positions = t.cat((line_positions,t.tensor([center + j * difference/4])),axis=0)    
-                line_labels = t.cat((line_labels,t.tensor([[hour_calc,min_calc - 5 * j]])),axis=0)
-        else:
-            center = boxes[i,0] + (boxes[i,2] - boxes[i,0])/2
-            if center > hour_position:
-                if hour_label == 0:
-                    hour = 23
-                else:
-                    hour = hour_label - 1
-            else:
-                hour = hour_label
-            
-            if is_roman(int(boxes[i][5].item())):
-                min = 0
-            else:
-                min = NUMERAL_LUT[class_names[int(boxes[i][5].item())]]
-                
-            line_positions = t.cat((line_positions,t.tensor([center])),axis=0)
-            line_labels = t.cat((line_labels,t.tensor([[hour,min]])),axis=0)
-            
-    assert line_positions is not None, 'Coarse Line Position Error: No Line Position'
-    assert line_labels is not None, 'Coarse Line Position Error: No Line Labels'
-    
+                line_labels = t.cat((line_labels,label))
+    last_box = boxes[-1]
+
+    last_val = t.tensor([NUMERAL_LUT[class_names[last_box[5]]]])
+    last_position = t.tensor([(last_box[0] + (last_box[2] - last_box[0])/2)])
+
+    line_positions = t.cat((line_positions,last_position))
+    line_labels = t.cat((line_labels,last_val))
     return line_positions,line_labels
         
 def get_coarse_lines(coarse_segment,line_positions,line_labels,position,save_patches=False,fd=None):
@@ -205,13 +162,12 @@ def get_coarse_lines(coarse_segment,line_positions,line_labels,position,save_pat
     coarse_lines = None
     vert_edges = cv.Sobel(coarse_segment,cv.CV_8U,1,0,ksize=VS_KERNEL)
     _ , threshold = cv.threshold(vert_edges,0,255,cv.THRESH_BINARY + cv.THRESH_OTSU)
-    
+    cv.imwrite('threshold.png',threshold)
     for i,line in enumerate(line_positions):
         patch = threshold[:,int(line) - PATCH_WIDTH:int(line) + PATCH_WIDTH]
-
         # Rotate Patch 90deg to avoid limit as angle approaches zero
         patch_rotated = cv.rotate(patch,cv.ROTATE_90_CLOCKWISE)
-        linesX = cv.HoughLines(patch_rotated,COARSE_RHO_RES,COARSE_THETA_RES,COARSE_VOTE_THRESH,None,0,0,np.pi/2 - XTOL, np.pi/2 + XTOL)
+        linesX = cv.HoughLines(patch_rotated,COARSE_RHO_RES,COARSE_THETA_RES,COARSE_VOTE_THRESH,None,0,0,np.pi/2 - COARSE_XTOL, np.pi/2 + COARSE_XTOL)
         if linesX is not None:
             theta_sum = 0
             rho_sum = 0
@@ -228,11 +184,12 @@ def get_coarse_lines(coarse_segment,line_positions,line_labels,position,save_pat
             b = rho_offset/np.sin(theta_offset)
 
             # Rotate Line by 90 CC (x,y) -> (-y,x)     y = -(cos(t)/sin(t)) x + (rho/sin(t)) -> y = (sin(t)/cos(t)) x - (rho/cos(t))
+            # y = m x + b -> 
             m2 = np.sin(theta_offset)/np.cos(theta_offset)
-            b2 = - rho_offset/np.cos(theta_offset)
-            
-            intercept_offset = patch.shape[0] - 1
-            # b2 += intercept_offset
+            b2 = -rho_offset/np.cos(theta_offset)
+
+            intercept_offset = patch.shape[0]
+            b2 += intercept_offset
             # Offset of new origin
             dX = -(int(line.item()) - PATCH_WIDTH)
             dY = -position
@@ -241,25 +198,30 @@ def get_coarse_lines(coarse_segment,line_positions,line_labels,position,save_pat
             b3 = b2 - dY + m2*dX
 
             if coarse_lines is None:
-                coarse_lines = t.tensor([[m2,b3,line_labels[i][0],line_labels[i][1]]])
+                coarse_lines = t.tensor([[m2,b3,line_labels[i]]])
             else:
-                coarse_lines = t.cat((coarse_lines,t.tensor([[m2,b3,line_labels[i][0],line_labels[i][1]]])))
+                coarse_lines = t.cat((coarse_lines,t.tensor([[m2,b3,line_labels[i]]])))
 
-            if save_patches:
-                patch = cv.cvtColor(patch,cv.COLOR_GRAY2BGR)
-                patch_rotated = cv.cvtColor(patch_rotated,cv.COLOR_GRAY2BGR)
+        if save_patches and linesX is not None:
+            patch = cv.cvtColor(patch,cv.COLOR_GRAY2BGR)
+            patch_rotated = cv.cvtColor(patch_rotated,cv.COLOR_GRAY2BGR)
 
-                xt = 500
-                pt1 = (-xt,round(m2 * -xt + b2))
-                pt2 = (round(xt),round(m2*xt + b2))
-                cv.line(patch,pt1,pt2,(0,0,255),1)
-                cv.imwrite(f'images/coarse_patch_{i}_{fd}',patch)
+            dim = patch.shape
+            xt = 500
+            pt1 = (-xt,round(m2 * -xt + b2))
+            pt2 = (round(xt),round(m2*xt + b2))
+            cv.line(patch,pt1,pt2,(0,0,255),1)
+            cv.imwrite(f'images/coarse_patch_{line_labels[i]}_{fd}',patch)
 
-                xt = 5000
-                pt1 = (-xt,round(m * -xt + b))
-                pt2 = (round(xt),round(m*xt + b))
-                cv.line(patch_rotated,pt1,pt2,(0,0,255),1)
-                cv.imwrite(f'images/coarse_patch_rot_{i}_{fd}',patch_rotated)
+            dim = patch_rotated.shape
+            xt = 5000
+            pt1 = (0,round(m * 0 + b))
+            pt2 = (round(dim[1]),round(m*dim[1] + b))
+            cv.line(patch_rotated,pt1,pt2,(0,0,255),1)
+            cv.imwrite(f'images/coarse_patch_rot_{line_labels[i]}_{fd}',patch_rotated)
+        elif save_patches:
+            cv.imwrite(f'images/coarse_patch_{line_labels[i]}_{fd}',patch)
+
                 
     assert coarse_lines is not None, 'Coarse Line Detection Error: No Lines Detected'
     
@@ -269,41 +231,41 @@ def get_fine_line_positions(boxes):
     ## Gets Line Positions of Fine Scale Using Hough Transform
     # Determine X position of quarter ticks for Hough Transform
     
-    box_ids = boxes[:,5].type(t.int)
-
     line_labels = None
     line_positions = None
 
-    for i in range(len(boxes)):
-        center = boxes[i][0] + (boxes[i][2] - boxes[i][0])/2
-        minute = get_minutes(box_ids,i)
+    for i in range(len(boxes[:-1])):
+        curr_box = boxes[i]
+        curr_value = NUMERAL_LUT[class_names[curr_box[5]]]
+
+        next_box = boxes[i + 1]
+        next_value = NUMERAL_LUT[class_names[next_box[5]]]
+
+        position_delta = (next_box[0] + (next_box[2] - next_box[0])/2) - (curr_box[0] + (curr_box[2] - curr_box[0])/2)
+        value_delta = next_value - curr_value
+        x = (curr_box[0] + (curr_box[2] - curr_box[0])/2)
+        
+        dX = position_delta/2
+        dV = value_delta/2
 
         for j in range(2):
-            if j == 0:
-                if line_positions is None:
-                    line_positions = t.tensor([center])
-                else:
-                    line_positions = t.cat((line_positions,t.tensor([center])))
-                
-                if line_labels is None:
-                    line_labels = t.tensor([minute])
-                else:
-                    line_labels = t.cat((line_labels,t.tensor([minute])),axis=0)
+            position = t.tensor([x + j*dX])
+            label = t.tensor([curr_value + j*dV])
+            if line_positions is None:
+                line_positions = position
             else:
-                if i < len(boxes) - 1:
-                    next_box = boxes[i + 1]
-                    next_center = next_box[0] + (next_box[2] - next_box[0])/2
+                line_positions = t.cat((line_positions,position))
+            if line_labels is None:
+                line_labels = label
+            else:
+                line_labels = t.cat((line_labels,label))
+    last_box = boxes[-1]
 
-                    midpoint = center + (next_center-center)/2
-                    if line_positions is None:
-                        line_positions = t.tensor([midpoint])
-                    else:
-                        line_positions = t.cat((line_positions,t.tensor([midpoint])))
-                    
-                    if line_labels is None:
-                        line_labels = t.tensor([minute - 10])
-                    else:
-                        line_labels = t.cat((line_labels,t.tensor([minute - 10])),axis=0)
+    last_val = t.tensor([NUMERAL_LUT[class_names[last_box[5]]]])
+    last_position = t.tensor([(last_box[0] + (last_box[2] - last_box[0])/2)])
+
+    line_positions = t.cat((line_positions,last_position))
+    line_labels = t.cat((line_labels,last_val))
     
     assert line_positions is not None, 'Fine Line Position Error: No Line Position'
     assert line_labels is not None, 'Fine Line Position Error: No Line Labels'
@@ -320,7 +282,7 @@ def get_fine_lines(fine_segment,line_positions,line_labels,position,save_patches
         # Rotate Patch 90deg to avoid limit as angle approaches zero
         patch_rotated = cv.rotate(patch,cv.ROTATE_90_CLOCKWISE)
         
-        linesX = cv.HoughLines(patch_rotated,FINE_RHO_RES,FINE_THETA_RES,FINE_VOTE_THRESH,None,0,0,np.pi/2 - XTOL, np.pi/2 + XTOL)
+        linesX = cv.HoughLines(patch_rotated,FINE_RHO_RES,FINE_THETA_RES,FINE_VOTE_THRESH,None,0,0,np.pi/2 - FINE_XTOL, np.pi/2 + FINE_XTOL)
 
         if linesX is not None:
             theta_sum = 0
@@ -339,12 +301,14 @@ def get_fine_lines(fine_segment,line_positions,line_labels,position,save_patches
 
             # Rotate Line by 90 CC (x,y) -> (-y,x)     y = -(cos(t)/sin(t)) x + (rho/sin(t)) -> y = (sin(t)/cos(t)) x - (rho/cos(t))
             m2 = np.sin(theta_offset)/np.cos(theta_offset)
-            b2 = - rho_offset/np.cos(theta_offset)
-        
+            b2 = -rho_offset/np.cos(theta_offset)
+
             # Offset of new origin
             dX = -(int(line.item()) - PATCH_WIDTH)
             dY = -position
             
+            intercept_offset = patch.shape[0]
+            b2 += intercept_offset
             # New intercept after translation
             b3 = b2 - dY + m2*dX
             
@@ -375,7 +339,7 @@ def get_fine_lines(fine_segment,line_positions,line_labels,position,save_patches
 
     return fine_lines
 
-def get_coarse_points(lines,boundary_line,numeral_positions):
+def get_coarse_points(lines,boundary_line):
     m1 = boundary_line[0]
     b1 = boundary_line[1]
     coarse_points = None
@@ -387,12 +351,12 @@ def get_coarse_points(lines,boundary_line,numeral_positions):
         y0 = -(b1*m2 - b2*m1)/(m1 - m2)
         
         if coarse_points is None:
-            coarse_points = t.tensor([[x0,y0,pt[2],pt[3]]])
+            coarse_points = t.tensor([[x0,y0,pt[2]]])
         else:
-            coarse_points = t.cat((coarse_points,t.tensor([[x0,y0,pt[2],pt[3]]])))
+            coarse_points = t.cat((coarse_points,t.tensor([[x0,y0,pt[2]]])))
     return coarse_points
 
-def get_fine_points(lines,boundary_line,numeral_positions):
+def get_fine_points(lines,boundary_line):
     m1 = boundary_line[0]
     b1 = boundary_line[1]
     fine_points = None
@@ -409,184 +373,74 @@ def get_fine_points(lines,boundary_line,numeral_positions):
             fine_points = t.cat((fine_points,t.tensor([[x0,y0,pt[2]]])))
     return fine_points
 
-def label_coarse_points(lines,extend_left=False,extend_right=False):
+def label_coarse_points(points,extend_left=False,extend_right=False):
     points_out = None
-    for i,line in enumerate(lines[:-1]):
-        current_hour = lines[i][2]
-        current_min = lines[i][3]
-
-        next_hour = lines[i + 1][2]
-        next_min = lines[i + 1][3]
-        x = lines[i][0].item()
-        y = lines[i][1].item()
-        
-        x2 = lines[i + 1][0].item()
-        y2 = lines[i + 1][1].item()
-        
-        hour = current_hour.item()
-        minute = current_min.item()
-        
-        if current_hour == next_hour:
-            difference = current_min - next_min
-            n = int(difference.item() - 1)
-
-            dX = (x2 - x)/difference
-            dY = (y2 - y)/difference
-
-            if points_out is None:
-                points_out = t.tensor([[x,y,hour,minute]])
-            else:
-                points_out = t.cat((points_out,t.tensor([[x,y,hour,minute]])))
-        
-            for j in range(n):
-                y += dY
-                x += dX
-                points_out = t.cat((points_out,t.tensor([[x,y,hour,minute - j - 1]])))
-                
-        elif current_min == 0:
-            difference = 60 - next_min
-            n = int(difference.item() - 1)
-            dX = (x2 - x)/difference
-            dY = (y2 - y)/difference
-
-            if points_out is None:
-                points_out = t.tensor([[x,y,hour,minute]])
-            else:
-                points_out = t.cat((points_out,t.tensor([[x,y,hour,minute]])))
-
-            if hour == 0:
-                hour = 23
-            else:
-                hour -= 1
-
-            minute = 60
-
-            for j in range(n):
-                y += dY
-                x += dX
-                points_out = t.cat((points_out,t.tensor([[x,y,hour,minute - j - 1]])))
-        else:
-            difference = int(current_min.item())
-            div1 = difference
-            n1 = difference - 1
-
-            difference = 60 - int(next_min.item())
-            div2 = difference
-
-            n2 = difference - 1
-            dX = (x2 - x)/(div1 + div2)
-            dY = (y2 - y)/(div1 + div2)
-            
-            if points_out is None:
-                points_out = t.tensor([[x,y,hour,minute]])
-            else:
-                points_out = t.cat((points_out,t.tensor([[x,y,hour,minute]])))
-
-            for i in range(n1):
-                y += dY
-                x += dX
-                t.cat((points_out,t.tensor([[x,y,hour,minute - i - 1]])))
-
-            if points_out is None:
-                points_out = t.tensor([[x,y,hour,minute]])
-            else:
-                points_out = t.cat((points_out,t.tensor([[x,y,hour,minute]])))
-
-            if hour == 1:
-                hour = 24
-            else:
-                hour -= 1
-            minute = 60
-            for j in range(n2):
-                y += dY
-                x += dX
-                points_out = t.cat((points_out,t.tensor([[x,y,hour,minute - j - 1]])))
-                
+    for i,point in enumerate(points[:-1]):
+        current_val = point[2]
+        next_val = points[i + 1][2]
+        degree_gap = next_val - current_val
+        steps = abs(6*degree_gap)
+        iX = point[0]
+        iY = point[1]
+        dX = (points[i + 1][0] - iX)/steps
+        dY = (points[i + 1][1] - iY)/steps
         if extend_left and i == 0:
-            
-            x = lines[0][0]
-            y = lines[0][1]
-            
-            hour = current_hour.item()
-            minute = current_min.item()
-            if minute == 55:
-                for j in range(1,5):
-                    y -= dY
-                    x -= dX
-                    points_out = t.cat((t.tensor([[x,y,hour,minute + j]]),points_out))     
-                y -= dY
-                x -= dX
-                points_out = t.cat((t.tensor([[x,y,hour,minute + j]]),points_out))            
-            else:  
-                for j in range(1,6):
-                    y -= dY
-                    x -= dX
-                    points_out = t.cat((t.tensor([[x,y,hour,minute + j]]),points_out))                
-                 
-    x = lines[-1][0]
-    y = lines[-1][1]
-    hour = lines[-1][2]
-    minute = lines[-1][3]
-    points_out = t.cat((points_out,t.tensor([[x,y,hour,minute]])))
-    
-    if extend_right:
-        if minute == 0:
-            minute = 60
-            if hour == 0:
-                hour = 23
-            else:
-                hour -= 1
-        for j in range(1,6):
-            x += dX
-            y += dY
-            points_out = t.cat((points_out,t.tensor([[x,y,hour,minute - j]])))
+            for j in range(1,EXTEND_DEGREES*6):
+                if points_out is None:
+                    points_out = t.tensor([[iX - dX*j,iY - dY*j,current_val - j*degree_gap/6]])
+                else:
+                    points_out = t.cat((points_out,t.tensor([[iX - dX*j,iY - dY*j,current_val - j*degree_gap/6]])))
         
+        for j in range(int(steps.item())):
+            if points_out is None:
+                points_out = t.tensor([[iX + dX*j,iY + dY*j,current_val + j*degree_gap/6]])
+            else:
+                points_out = t.cat((points_out,t.tensor([[iX + dX*j,iY + dY*j,current_val + j*degree_gap/6]])))
+    last_point = points[-1]
+    points_out = t.cat((points_out,last_point.unsqueeze(0)))
+    current_val = last_point[2]
+    iX = last_point[0]
+    iY = last_point[1]
+    if extend_right:
+        for j in range(1,EXTEND_DEGREES*6):
+            if points_out is None:
+                points_out = t.tensor([[iX + dX*j,iY + dY*j,current_val + j*degree_gap/6]])
+            else:
+                points_out = t.cat((points_out,t.tensor([[iX + dX*j,iY + dY*j,current_val + j*degree_gap/6]])))
     return points_out
 
 def label_fine_points(points):
     points_out = None
-    for i in range(len(points) - 1):
-        diff = int((points[i][2] - points[i+1][2]).item())
-        n = diff//2 - 1
-        x = points[i][0] 
-        x_1 = points[i + 1][0]
-        y = points[i][1]
-        y_1 = points[i+1][1]
-
-        dY = (y_1 - y)/(diff/2)
-        dX = (x_1 - x)/(diff/2)
-        if points[i][2] == 60:
-            x_tra = x - dX
-            y_tra = y - dY
+    for i,point in enumerate(points[:-1]):
+        current_val = point[2]
+        next_val = points[i + 1][2]
+        degree_gap = next_val - current_val
+        steps = abs(6*degree_gap)
+        iX = point[0]
+        iY = point[1]
+        dX = (points[i + 1][0] - iX)/steps
+        dY = (points[i + 1][1] - iY)/steps
+        for j in range(int(steps.item())):
             if points_out is None:
-                points_out = t.tensor([[x_tra,y_tra,61]])
+                points_out = t.tensor([[iX + dX*j,iY + dY*j,current_val + j*degree_gap/6]])
             else:
-                points_out = t.cat((points_out,t.tensor([[x_tra, y_tra,61]])))
-                
-        if points_out is None:
-            points_out = t.tensor([[x,y,points[i][2]]])
-        else:
-            points_out = t.cat((points_out,t.tensor([[x, y,points[i][2]]])))
-        for j in range(n):
-            y += dY
-            x += dX
-            points_out = t.cat((points_out,t.tensor([[x, y,points[i][2] - 2 * j - 2]])))
-            
+                points_out = t.cat((points_out,t.tensor([[iX + dX*j,iY + dY*j,current_val + j*degree_gap/6]])))
+
     points_out = t.cat((points_out,t.tensor([[points[-1][0],points[-1][1],0]])))
-    points_out = t.cat((points_out,t.tensor([[points[-1][0] + dX,points[-1][1] + dY,-2]])))
     return points_out
 
-def measure_hours_mins(coarse_points,fine_points):
+def measure_degree_mins(coarse_points,fine_points):
     arrow_point = fine_points[-2][0]
     k = 0
     if len(coarse_points) > 1:
         while round(arrow_point.item() - coarse_points[k][0].item()) > 0 and k < len(coarse_points) - 1:
             k += 1
             point = coarse_points[k]
-        hrs,mins = point[2],point[3]
+        degrees = t.floor(point[2])
+        mins = (point[2] - degrees)*60
     else:
-        hrs,mins = (-1,-1)
-    return hrs,mins
+        degrees,mins = (-1,-1)
+    return degrees,mins
 
 def measure_seconds(coarse_points,fine_points):
     y_low = fine_points[0][0]
@@ -614,7 +468,10 @@ def measure_seconds(coarse_points,fine_points):
     min_1,index_1 = t.min(min_0,0)
     min_index = index_1.item()
     hour_index = index_0[min_index].item()
-    return fine_points[hour_index][-1]
+    value = fine_points[hour_index][-1]
+    mins = t.floor(value)
+    seconds = (value - mins)*60
+    return mins,seconds
 
 
 def infer_measure(image,dets,save_img=False,fd=None,save_patches=False,save_thresh=False):
