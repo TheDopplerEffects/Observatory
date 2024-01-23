@@ -4,8 +4,8 @@ from post_processing.post_processing import *
 from post_processing.utils import *
 
 from config.config import *
-impath = '/home/tim/Documents/Datasets/VernierImages/DEC/DecV1/corrected/images/400.png'
-lblpath = '/home/tim/Documents/Datasets/VernierImages/DEC/DecV1/corrected/labels/400.txt'
+impath = '/home/tim/Documents/Datasets/VernierImages/DEC/DecV1/corrected/images/243.png'
+lblpath = '/home/tim/Documents/Datasets/VernierImages/DEC/DecV1/corrected/labels/243.txt'
 
 image = cv.imread(impath,cv.IMREAD_GRAYSCALE)
 class_names = ['20', '40', '60', 'A', 'Arrow', 'B', 'I', 'II', 'III', 'IIII', 'IX', 'V',
@@ -30,5 +30,6 @@ with open(lblpath,'r') as f:
 
 dets = t.tensor(dets)
 
-measure,image = infer_measure(image,dets)
+measure,image = infer_measure(image,dets,save_img=True,fd='0.png')
+cv.imwrite('image.png',image)
 print(measure)

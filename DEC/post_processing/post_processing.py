@@ -135,10 +135,23 @@ def get_coarse_line_positions(boxes):
         
         dX = position_delta/5
         dV = value_delta/5
+        if i == 0:
+            for j in range(1,EXTEND_DEGREES + 1):
+                position = t.tensor([x - j*dX])
+                label = t.tensor([curr_value - j*dV])
+                if position > 0:
+                    if line_positions is None:
+                        line_positions = position
+                    else:
+                        line_positions = t.cat((position,line_positions))
+                    if line_labels is None:
+                        line_labels = label
+                    else:
+                        line_labels = t.cat((label,line_labels))
 
-        for i in range(5):
-            position = t.tensor([x + i*dX])
-            label = t.tensor([curr_value + i*dV])
+        for j in range(5):
+            position = t.tensor([x + j*dX])
+            label = t.tensor([curr_value + j*dV])
             if line_positions is None:
                 line_positions = position
             else:
@@ -154,6 +167,22 @@ def get_coarse_line_positions(boxes):
 
     line_positions = t.cat((line_positions,last_position))
     line_labels = t.cat((line_labels,last_val))
+
+    if last_val == 0 or last_val == 90:
+        dV = -dV
+
+    for j in range(1,EXTEND_DEGREES + 1):
+        position = t.tensor([last_position + j*dX])
+        label = t.tensor([last_val + j*dV])
+        if line_positions is None:
+            line_positions = position
+        else:
+            line_positions = t.cat((line_positions,position))
+        if line_labels is None:
+            line_labels = label
+        else:
+            line_labels = t.cat((line_labels,label))
+
     return line_positions,line_labels
         
 def get_coarse_lines(coarse_segment,line_positions,line_labels,position,save_patches=False,fd=None):
@@ -162,7 +191,6 @@ def get_coarse_lines(coarse_segment,line_positions,line_labels,position,save_pat
     coarse_lines = None
     vert_edges = cv.Sobel(coarse_segment,cv.CV_8U,1,0,ksize=VS_KERNEL)
     _ , threshold = cv.threshold(vert_edges,0,255,cv.THRESH_BINARY + cv.THRESH_OTSU)
-    cv.imwrite('threshold.png',threshold)
     for i,line in enumerate(line_positions):
         patch = threshold[:,int(line) - PATCH_WIDTH:int(line) + PATCH_WIDTH]
         # Rotate Patch 90deg to avoid limit as angle approaches zero
@@ -373,7 +401,7 @@ def get_fine_points(lines,boundary_line):
             fine_points = t.cat((fine_points,t.tensor([[x0,y0,pt[2]]])))
     return fine_points
 
-def label_coarse_points(points,extend_left=False,extend_right=False):
+def label_coarse_points(points):
     points_out = None
     for i,point in enumerate(points[:-1]):
         current_val = point[2]
@@ -384,13 +412,6 @@ def label_coarse_points(points,extend_left=False,extend_right=False):
         iY = point[1]
         dX = (points[i + 1][0] - iX)/steps
         dY = (points[i + 1][1] - iY)/steps
-        if extend_left and i == 0:
-            for j in range(1,EXTEND_DEGREES*6):
-                if points_out is None:
-                    points_out = t.tensor([[iX - dX*j,iY - dY*j,current_val - j*degree_gap/6]])
-                else:
-                    points_out = t.cat((points_out,t.tensor([[iX - dX*j,iY - dY*j,current_val - j*degree_gap/6]])))
-        
         for j in range(int(steps.item())):
             if points_out is None:
                 points_out = t.tensor([[iX + dX*j,iY + dY*j,current_val + j*degree_gap/6]])
@@ -401,12 +422,14 @@ def label_coarse_points(points,extend_left=False,extend_right=False):
     current_val = last_point[2]
     iX = last_point[0]
     iY = last_point[1]
-    if extend_right:
-        for j in range(1,EXTEND_DEGREES*6):
-            if points_out is None:
-                points_out = t.tensor([[iX + dX*j,iY + dY*j,current_val + j*degree_gap/6]])
-            else:
-                points_out = t.cat((points_out,t.tensor([[iX + dX*j,iY + dY*j,current_val + j*degree_gap/6]])))
+    if current_val == 0 or current_val == 90:
+        degree_gap = -degree_gap
+    # if extend_right:
+    #     for j in range(1,EXTEND_DEGREES*6):
+    #         if points_out is None:
+    #             points_out = t.tensor([[iX + dX*j,iY + dY*j,current_val + j*degree_gap/6]])
+    #         else:
+    #             points_out = t.cat((points_out,t.tensor([[iX + dX*j,iY + dY*j,current_val + j*degree_gap/6]])))
     return points_out
 
 def label_fine_points(points):
@@ -482,27 +505,18 @@ def infer_measure(image,dets,save_img=False,fd=None,save_patches=False,save_thre
     coarse_line_positions,coarse_line_labels = get_coarse_line_positions(coarse_boxes)
     fine_line_positions,fine_line_labels = get_fine_line_positions(fine_boxes)
 
-    coarse_lines = get_coarse_lines(coarse_segment,coarse_line_positions,coarse_line_labels,numeral_positions[1],save_patches=save_patches,fd=fd)
+    coarse_lines = get_coarse_lines(coarse_segment,coarse_line_positions,coarse_line_labels,numeral_positions[1],save_patches=True,fd=fd)
     fine_lines = get_fine_lines(fine_segment,fine_line_positions,fine_line_labels,boundary_line[1],save_patches=save_patches,fd=fd)
 
     coarse_points_tmp = get_coarse_points(coarse_lines,boundary_line)
     fine_points_tmp = get_fine_points(fine_lines,boundary_line)
 
-    coarse_points = label_coarse_points(coarse_points_tmp,True,True)
+    coarse_points = label_coarse_points(coarse_points_tmp)
     fine_points = label_fine_points(fine_points_tmp)
 
     degrees,coarse_mins = measure_degree_mins(coarse_points,fine_points)
     fine_mins,seconds = measure_seconds(coarse_points,fine_points)
-    
-    # if seconds == 61:
-    #     seconds = t.tensor(0)
-    # elif seconds == -2:
-    #     seconds = t.tensor(0)
-    # elif seconds == 60:
-    #     # mins +=1
-    #     seconds = t.tensor(0)
-
-    # hours,mins,seconds = 0,0,0
+    print(coarse_line_positions,coarse_line_labels)
     if save_img:
         image = cv.cvtColor(image,cv.COLOR_GRAY2BGR)
         
@@ -510,11 +524,11 @@ def infer_measure(image,dets,save_img=False,fd=None,save_patches=False,save_thre
         # image = draw_patch_boxes(image,coarse_boxes,fine_boxes,numeral_positions,boundary_line[1])     
         # image = draw_boxes(image,coarse_boxes)
         # image = draw_boxes(image,fine_boxes)
-        image = draw_vert_lines(image,coarse_lines,numeral_positions,col=(255,0,0))
-        image = draw_vert_lines(image,fine_lines,numeral_positions,col=(0,0,255))
-        image = draw_fine_points(image,fine_points)
+        # image = draw_vert_lines(image,coarse_lines,numeral_positions,col=(255,0,0))
+        # image = draw_vert_lines(image,fine_lines,numeral_positions,col=(0,0,255))
+        # image = draw_fine_points(image,fine_points)
         image = draw_coarse_points(image,coarse_points)
-        verify_points(t.clone(coarse_points),t.clone(fine_points))
+        # verify_points(t.clone(coarse_points),t.clone(fine_points))
         return [degrees,coarse_mins + fine_mins,seconds],image
     else:
         return [degrees,coarse_mins + fine_mins,seconds],image
