@@ -476,31 +476,31 @@ def measure_seconds(coarse_points,fine_points):
 
 def infer_measure(image,dets,save_img=False,fd=None,save_patches=False,save_thresh=False):
     fine_boxes,coarse_boxes,numeral_positions = post_process_boxes(dets,YDIM/2,CONF_THRESH)
-    extend_left,extend_right = verify_boxes(fine_boxes,coarse_boxes)
+    # extend_left,extend_right = verify_boxes(fine_boxes,coarse_boxes)
     coarse_segment, fine_segment, boundary_line = split_image(image,numeral_positions,save_thresh=save_thresh,fd=fd)
     
-    coarse_line_positions,coarse_line_labels = get_coarse_line_positions(coarse_boxes,image.shape)
+    coarse_line_positions,coarse_line_labels = get_coarse_line_positions(coarse_boxes)
     fine_line_positions,fine_line_labels = get_fine_line_positions(fine_boxes)
 
     coarse_lines = get_coarse_lines(coarse_segment,coarse_line_positions,coarse_line_labels,numeral_positions[1],save_patches=save_patches,fd=fd)
     fine_lines = get_fine_lines(fine_segment,fine_line_positions,fine_line_labels,boundary_line[1],save_patches=save_patches,fd=fd)
 
-    coarse_points_tmp = get_coarse_points(coarse_lines,boundary_line,numeral_positions)
-    fine_points_tmp = get_fine_points(fine_lines,boundary_line,numeral_positions)
+    coarse_points_tmp = get_coarse_points(coarse_lines,boundary_line)
+    fine_points_tmp = get_fine_points(fine_lines,boundary_line)
 
     coarse_points = label_coarse_points(coarse_points_tmp,True,True)
     fine_points = label_fine_points(fine_points_tmp)
 
-    hours,mins = measure_hours_mins(coarse_points,fine_points)
-    seconds = measure_seconds(coarse_points,fine_points)
+    degrees,coarse_mins = measure_degree_mins(coarse_points,fine_points)
+    fine_mins,seconds = measure_seconds(coarse_points,fine_points)
     
-    if seconds == 61:
-        seconds = t.tensor(0)
-    elif seconds == -2:
-        seconds = t.tensor(0)
-    elif seconds == 60:
-        # mins +=1
-        seconds = t.tensor(0)
+    # if seconds == 61:
+    #     seconds = t.tensor(0)
+    # elif seconds == -2:
+    #     seconds = t.tensor(0)
+    # elif seconds == 60:
+    #     # mins +=1
+    #     seconds = t.tensor(0)
 
     # hours,mins,seconds = 0,0,0
     if save_img:
@@ -515,6 +515,6 @@ def infer_measure(image,dets,save_img=False,fd=None,save_patches=False,save_thre
         image = draw_fine_points(image,fine_points)
         image = draw_coarse_points(image,coarse_points)
         verify_points(t.clone(coarse_points),t.clone(fine_points))
-        return [hours,mins,seconds],image
+        return [degrees,coarse_mins + fine_mins,seconds],image
     else:
-        return [hours,mins,seconds],image
+        return [degrees,coarse_mins + fine_mins,seconds],image
