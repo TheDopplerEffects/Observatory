@@ -67,9 +67,12 @@ def split_image(img,numeral_positions,save_thresh=False,fd=None):
 
     # Filter, Threshold and Houghlines
     edge_map = cv.Sobel(cropped_img,cv.CV_8U,0,1,ksize=VS_KERNEL)
-    _ , yThresh = cv.threshold(cv.GaussianBlur(edge_map,TH_YKERNEL,0),0,255,cv.THRESH_BINARY + cv.THRESH_OTSU)
+    _ , yThresh = cv.threshold(edge_map,0,255,cv.THRESH_BINARY + cv.THRESH_OTSU)
     yLines = cv.HoughLines(yThresh, SEGMENT_RHO_RES, SEGMENT_THETA_RES, SEGMENT_VOTE_RES, None, 0, 0, np.pi/2 - YTOL, np.pi/2 + YTOL)
     
+    if save_thresh:
+        cv.imwrite('edge.png',edge_map)
+        cv.imwrite('thresh.png',yThresh)
     assert yLines is not None, 'Image Split Error: No Boundary Lines Detected'
 
     theta_sum = 0
@@ -93,6 +96,9 @@ def split_image(img,numeral_positions,save_thresh=False,fd=None):
     boundary_edge = round(b + coarse_pos)
     boundary_line = [m,b + coarse_pos]
     
+    boundary_edge = round(center + coarse_pos)
+    boundary_line = [m,center + coarse_pos]
+
     return img[coarse_pos:boundary_edge],img[boundary_edge:fine_pos],boundary_line
 
 def is_roman(cls_id):
@@ -211,28 +217,18 @@ def get_coarse_lines(coarse_segment,line_positions,line_labels,position,save_pat
 
         # Rotate Patch 90deg to avoid limit as angle approaches zero
         patch_rotated = cv.rotate(patch,cv.ROTATE_90_CLOCKWISE)
-        linesX = cv.HoughLines(patch_rotated,COARSE_RHO_RES,COARSE_THETA_RES,COARSE_VOTE_THRESH,None,0,0,np.pi/2 - XTOL, np.pi/2 + XTOL)
-        if linesX is not None:
-            theta_sum = 0
-            rho_sum = 0
-            # Average Detected Lines by rho and theta
-            for k in range(0, len(linesX)):
-                rho = linesX[k][0][0]
-                theta = linesX[k][0][1]
-                theta_sum += theta
-                rho_sum += rho
-            theta_offset = theta_sum/len(linesX)
-            rho_offset = rho_sum/len(linesX)
+        lines = cv.HoughLines(patch_rotated,COARSE_RHO_RES,COARSE_THETA_RES,COARSE_VOTE_THRESH,None,0,0,np.pi/2 - XTOL, np.pi/2 + XTOL)
+        if lines is not None:
             
-            m = -np.cos(theta_offset)/np.sin(theta_offset)
-            b = rho_offset/np.sin(theta_offset)
+            # Average Detected Lines Together
+            theta_offset = np.mean(lines[:,0,1])
+            rho_offset = np.mean(lines[:,0,0])
 
             # Rotate Line by 90 CC (x,y) -> (-y,x)     y = -(cos(t)/sin(t)) x + (rho/sin(t)) -> y = (sin(t)/cos(t)) x - (rho/cos(t))
             m2 = np.sin(theta_offset)/np.cos(theta_offset)
             b2 = - rho_offset/np.cos(theta_offset)
             
-            intercept_offset = patch.shape[0] - 1
-            # b2 += intercept_offset
+            b2 += patch.shape[0]
             # Offset of new origin
             dX = -(int(line.item()) - PATCH_WIDTH)
             dY = -position
@@ -253,13 +249,7 @@ def get_coarse_lines(coarse_segment,line_positions,line_labels,position,save_pat
                 pt1 = (-xt,round(m2 * -xt + b2))
                 pt2 = (round(xt),round(m2*xt + b2))
                 cv.line(patch,pt1,pt2,(0,0,255),1)
-                cv.imwrite(f'images/coarse_patch_{i}_{fd}',patch)
-
-                xt = 5000
-                pt1 = (-xt,round(m * -xt + b))
-                pt2 = (round(xt),round(m*xt + b))
-                cv.line(patch_rotated,pt1,pt2,(0,0,255),1)
-                cv.imwrite(f'images/coarse_patch_rot_{i}_{fd}',patch_rotated)
+                cv.imwrite(f'images/coarse_patch_{line_labels[i][0]}_{fd}',patch)
                 
     assert coarse_lines is not None, 'Coarse Line Detection Error: No Lines Detected'
     
@@ -320,27 +310,18 @@ def get_fine_lines(fine_segment,line_positions,line_labels,position,save_patches
         # Rotate Patch 90deg to avoid limit as angle approaches zero
         patch_rotated = cv.rotate(patch,cv.ROTATE_90_CLOCKWISE)
         
-        linesX = cv.HoughLines(patch_rotated,FINE_RHO_RES,FINE_THETA_RES,FINE_VOTE_THRESH,None,0,0,np.pi/2 - XTOL, np.pi/2 + XTOL)
+        lines = cv.HoughLines(patch_rotated,FINE_RHO_RES,FINE_THETA_RES,FINE_VOTE_THRESH,None,0,0,np.pi/2 - XTOL, np.pi/2 + XTOL)
 
-        if linesX is not None:
-            theta_sum = 0
-            rho_sum = 0
-            for k in range(0, len(linesX)):
-                rho = linesX[k][0][0]
-                theta = linesX[k][0][1]
-                theta_sum += theta
-                rho_sum += rho
-            
-            theta_offset = theta_sum/len(linesX)
-            rho_offset = rho_sum/len(linesX)
+        if lines is not None:
 
-            m = -np.cos(theta_offset)/np.sin(theta_offset)
-            b = rho_offset/np.sin(theta_offset)
-
+            theta_offset = np.mean(lines[:,0,1])
+            rho_offset = np.mean(lines[:,0,0])
             # Rotate Line by 90 CC (x,y) -> (-y,x)     y = -(cos(t)/sin(t)) x + (rho/sin(t)) -> y = (sin(t)/cos(t)) x - (rho/cos(t))
             m2 = np.sin(theta_offset)/np.cos(theta_offset)
             b2 = - rho_offset/np.cos(theta_offset)
-        
+
+            b2 += patch.shape[0]
+
             # Offset of new origin
             dX = -(int(line.item()) - PATCH_WIDTH)
             dY = -position
@@ -362,14 +343,7 @@ def get_fine_lines(fine_segment,line_positions,line_labels,position,save_patches
                 pt1 = (-xt,round(m2 * -xt + b2))
                 pt2 = (round(xt),round(m2*xt + b2))
                 cv.line(patch,pt1,pt2,(0,0,255),1)
-                cv.imwrite(f'images/fine_patch_{i}_{fd}',patch)
-
-                dim = patch_rotated.shape
-                xt = 5000
-                pt1 = (-xt,round(m * -xt + b))
-                pt2 = (round(xt),round(m*xt + b))
-                cv.line(patch_rotated,pt1,pt2,(0,0,255),1)
-                cv.imwrite(f'images/fine_patch_rot_{i}_{fd}',patch_rotated)
+                cv.imwrite(f'images/fine_patch_{line_labels[i]}_{fd}',patch)
                 
     assert fine_lines is not None, 'Fine Line Detection Error: No Lines Detected'
 

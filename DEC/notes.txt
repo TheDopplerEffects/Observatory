@@ -1,0 +1,8 @@
+Image split
+* had to adjust the Sobel kernel size and step size to limit affect of small lines
+* Should test this on RA
+* Greatly increases accuracy of segment line which increased accuracy of coarse measurements by 20+%
+* Because spacing is non-linear, may need to adjust automatic extension of lines to include non-linear offset
+
+RA
+* Correcting image for patch offset greatly increased sec measurement accuracy, 20+%
