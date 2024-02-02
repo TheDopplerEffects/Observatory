@@ -39,10 +39,9 @@ correct_two = 0
 correct_four = 0
 no_detects = 0
 count = len(fds)
-# for fd in tqdm(fds):
+# fds = ['2d33ba49ac67439b.png']
+
 for fd in fds:
-# for fd in [0]:
-    # fd = '2d33ba49ac67439b.png'
     image = cv.imread(impath + fd,cv.IMREAD_GRAYSCALE)
     img_id = fd[:-4]
     with open(lblpath + img_id + '.txt','r') as f:

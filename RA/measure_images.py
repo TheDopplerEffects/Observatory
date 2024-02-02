@@ -45,15 +45,15 @@ def evaluate(detections,ground_truth):
 
             if gt[1] == mins:
                 min_sum += 1
+            else:
+                print(img,gt,measurement)
+                cv.imwrite(f'images/{img}',image)
                     
             if gt[2] == seconds:
                 sec_sum += 1
 
             if abs(gt[2] - seconds) <= 2:
                 sec_within_error_sum += 1
-            else:
-                print(img)
-                cv.imwrite(f'images/{img}',image)
                 
             if abs(gt[2] - seconds) <= 4:
                 sec_within_error_sum_f += 1
@@ -103,7 +103,7 @@ if __name__ == '__main__':
     # lblpath = '/home/tim/Documents/Datasets/VernierImages/RA/yolo/RAScaleMeasure/labels/'
     lblpath = '/ssd/Projects/VernierBaseline/results/'
     fds = os.listdir(path + 'images/')
-    # fds = ['60.png']
+    fds = ['60.png']
     # fds = ['204.png','159.png','95.png','60.png']
     detections = {}
     gt = {}
@@ -126,7 +126,7 @@ if __name__ == '__main__':
 
         dets = t.Tensor(dets)
         try:
-            measurement,image = infer_measure(image,dets,save_img=True,fd=fd,save_patches=False,save_thresh=False)
+            measurement,image = infer_measure(image,dets,save_img=True,fd=fd,save_patches=True,save_thresh=True)
             detections[fd] = {}
             detections[fd]['measurement'] = measurement
             detections[fd]['image'] = image

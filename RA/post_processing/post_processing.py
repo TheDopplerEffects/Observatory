@@ -68,25 +68,17 @@ def split_image(img,numeral_positions,save_thresh=False,fd=None):
     # Filter, Threshold and Houghlines
     edge_map = cv.Sobel(cropped_img,cv.CV_8U,0,1,ksize=VS_KERNEL)
     _ , yThresh = cv.threshold(edge_map,0,255,cv.THRESH_BINARY + cv.THRESH_OTSU)
-    yLines = cv.HoughLines(yThresh, SEGMENT_RHO_RES, SEGMENT_THETA_RES, SEGMENT_VOTE_RES, None, 0, 0, np.pi/2 - YTOL, np.pi/2 + YTOL)
+    lines = cv.HoughLines(yThresh, SEGMENT_RHO_RES, SEGMENT_THETA_RES, SEGMENT_VOTE_RES, None, 0, 0, np.pi/2 - YTOL, np.pi/2 + YTOL)
     
     if save_thresh:
         cv.imwrite('edge.png',edge_map)
         cv.imwrite('thresh.png',yThresh)
-    assert yLines is not None, 'Image Split Error: No Boundary Lines Detected'
 
-    theta_sum = 0
-    rho_sum = 0
-    
-    # Accumulate Multiple Line Detections
-    for k in range(0, len(yLines)):
-        rho = yLines[k][0][0]
-        theta = yLines[k][0][1]
-        theta_sum += theta
-        rho_sum += rho
-    
-    theta_offset = theta_sum/len(yLines)
-    rho_offset = rho_sum/len(yLines)
+    assert lines is not None, 'Image Split Error: No Boundary Lines Detected'
+
+    # Average Detected Lines Together
+    theta_offset = np.mean(lines[:,0,1])
+    rho_offset = np.mean(lines[:,0,0])
     
     # Convert Line to Slope-Intercept Form
     m = -(math.cos(theta_offset)/math.sin(theta_offset))
@@ -97,7 +89,7 @@ def split_image(img,numeral_positions,save_thresh=False,fd=None):
     boundary_line = [m,b + coarse_pos]
     
     boundary_edge = round(center + coarse_pos)
-    boundary_line = [m,center + coarse_pos]
+    boundary_line = [m,b + coarse_pos]
 
     return img[coarse_pos:boundary_edge],img[boundary_edge:fine_pos],boundary_line
 
@@ -625,7 +617,7 @@ def infer_measure(image,dets,save_img=False,fd=None,save_patches=False,save_thre
         
         image = draw_boundary_line(image,boundary_line)    
         # image = draw_patch_boxes(image,coarse_boxes,fine_boxes,numeral_positions,boundary_line[1])     
-        # image = draw_boxes(image,coarse_boxes)
+        image = draw_boxes(image,coarse_boxes)
         # image = draw_boxes(image,fine_boxes)
         image = draw_vert_lines(image,coarse_lines,numeral_positions,col=(255,0,0))
         image = draw_vert_lines(image,fine_lines,numeral_positions,col=(0,0,255))

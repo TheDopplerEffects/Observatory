@@ -25,6 +25,7 @@ HS_KERNEL = 1
 
 ## Sobel Step Size
 VS_DY = 2
+VH_DX = 1
 
 # Threshold Gaussian Kernel
 TH_XKERNEL = (9,5)
