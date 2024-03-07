@@ -65,7 +65,7 @@ _COLORS = np.array([[1.        , 0.523602  , 0.        ],
        [0.9456328 , 0.02977487, 0.        ]])
 
 def draw_vert_lines(image,lines,numeral_positions,col=(0,0,255)):
-    xt = 5000
+    xt = 10000
     for pt in lines:
         m = pt[0].item()
         b = pt[1].item()
@@ -159,7 +159,7 @@ def draw_boxes(img, boxes):
         x1 = int(box[2].item())
         y1 = int(box[3].item())
         color = (_COLORS[cls_id] * 255).astype(np.uint8).tolist()
-        text = '{}:{:.1f}%'.format(class_names[cls_id], score * 100)
+        text = '{}:{:.1f}%'.format(class_names[cls_id], score )
         txt_color = (0, 0, 0) if np.mean(_COLORS[cls_id]) > 0.5 else (255, 255, 255)
         font = cv2.FONT_HERSHEY_SIMPLEX
         txt_size = cv2.getTextSize(text, font, 0.4, 1)[0]

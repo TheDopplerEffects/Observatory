@@ -95,7 +95,7 @@ def draw_coarse_points(image, points):
                 -1
                 )
             cv2.putText(image, text, (x0 , y0 + txt_size[1] - 25), font, 0.4, (255,255,255), thickness=1)
-        cv2.circle(image,(x0,y0 - 1),0,(255,0,0),2)
+        cv2.circle(image,(x0,y0 - 1),1,(255,0,0),2)
     return image
 
 def draw_fine_points(image, points):
@@ -115,7 +115,7 @@ def draw_fine_points(image, points):
                 -1
                 )
             cv2.putText(image, text, (x0 , y0 + txt_size[1] + 20), font, 0.4, (255,255,255), thickness=1)
-        cv2.circle(image,(x0,y0 + 1),0,(0,0,255),2)
+        cv2.circle(image,(x0,y0 + 1),1,(0,0,255),2)
     return image
 
 def draw_boxes(img, boxes):

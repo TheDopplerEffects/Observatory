@@ -3,11 +3,12 @@ import torch as t
 import cv2 as cv
 import math
 import timeit
-
+import seaborn as sns
 from post_processing.error_checking import *
 from config.config import *
 from post_processing.utils import *
 from pprint import pprint
+
 def post_process_boxes(boxes,boundary,conf=0.6):
     """
     Post Processing for Detected BBoxes
@@ -44,9 +45,9 @@ def post_process_boxes(boxes,boundary,conf=0.6):
     sort = t.sort(coarse_boxes[:,0],descending=False)
     coarse_boxes_sorted = coarse_boxes[sort.indices]
 
-    # Get Appox Numeral Lines
-    fine_y_position = t.sum(fine_boxes_sorted[:,1])/len(fine_boxes_sorted[:,1])
-    coarse_y_position = t.sum(coarse_boxes_sorted[:,3])/len(coarse_boxes_sorted[:,3])
+    # Get Numeral Lines Locations
+    fine_y_position = t.min(fine_boxes_sorted[:,1])
+    coarse_y_position = t.max(coarse_boxes_sorted[:,3])
 
     assert fine_boxes_sorted is not None, 'Dectection Grouping Error: Sorted Fine Boxes Emtpy'
     assert coarse_boxes_sorted is not None, 'Dectection Grouping Error: Sorted Coarse Boxes Emtpy'
@@ -67,12 +68,36 @@ def split_image(img,numeral_positions,save_thresh=False,fd=None):
 
     # Filter, Threshold and Houghlines
     edge_map = cv.Sobel(cropped_img,cv.CV_8U,0,1,ksize=VS_KERNEL)
-    _ , yThresh = cv.threshold(edge_map,0,255,cv.THRESH_BINARY + cv.THRESH_OTSU)
+    retval , yThresh = cv.threshold(edge_map,0,255,cv.THRESH_BINARY + cv.THRESH_OTSU)
     lines = cv.HoughLines(yThresh, SEGMENT_RHO_RES, SEGMENT_THETA_RES, SEGMENT_VOTE_RES, None, 0, 0, np.pi/2 - YTOL, np.pi/2 + YTOL)
-    
     if save_thresh:
-        cv.imwrite('edge.png',edge_map)
-        cv.imwrite('thresh.png',yThresh)
+        hist = cv.calcHist([edge_map],[0],None,[256],[0,256])
+        hist_total = hist.sum()
+        hist_prob = np.divide(hist,hist_total).ravel()
+        variance = []
+        bins = np.arange(256)
+        variance = np.zeros(255)
+        for i in range(1,256):
+            p_b,p_f = np.hsplit(hist_prob,[i])
+            w_b,w_f = np.sum(p_b),np.sum(p_f)
+            
+            b_b,b_f = np.hsplit(bins,[i])
+            
+            mu_b,mu_f,mu_t = np.sum(p_b*b_b)/w_b,np.sum(p_f*b_f)/w_f, np.sum(bins*hist_prob)
+
+            variance[i - 1] = w_b*(mu_b - mu_t)**2 + w_f*(mu_f - mu_t)**2
+
+        # fig,ax = plt.subplots(layout='tight')
+        # plt.title('Image Intensity Histogram and Inter-Class Variance')
+        # ax2 = ax.twinx()
+        # ax.set_xlabel('Pixel Intensity')
+        # ax.set_ylabel('Pixel Count')
+        # ax2.set_ylabel('Inter-Class Variance')
+        # ax.plot(hist.ravel())
+        # ax2.plot(variance,'r')
+        # plt.savefig('histogram.png')
+        # cv.imwrite('edge.png',edge_map)
+        # cv.imwrite('thresh.png',yThresh)
 
     assert lines is not None, 'Image Split Error: No Boundary Lines Detected'
 
@@ -203,7 +228,7 @@ def get_coarse_lines(coarse_segment,line_positions,line_labels,position,save_pat
     coarse_lines = None
     vert_edges = cv.Sobel(coarse_segment,cv.CV_8U,1,0,ksize=VS_KERNEL)
     _ , threshold = cv.threshold(vert_edges,0,255,cv.THRESH_BINARY + cv.THRESH_OTSU)
-    
+
     for i,line in enumerate(line_positions):
         patch = threshold[:,int(line) - PATCH_WIDTH:int(line) + PATCH_WIDTH]
 
@@ -211,7 +236,6 @@ def get_coarse_lines(coarse_segment,line_positions,line_labels,position,save_pat
         patch_rotated = cv.rotate(patch,cv.ROTATE_90_CLOCKWISE)
         lines = cv.HoughLines(patch_rotated,COARSE_RHO_RES,COARSE_THETA_RES,COARSE_VOTE_THRESH,None,0,0,np.pi/2 - XTOL, np.pi/2 + XTOL)
         if lines is not None:
-            
             # Average Detected Lines Together
             theta_offset = np.mean(lines[:,0,1])
             rho_offset = np.mean(lines[:,0,0])
@@ -306,8 +330,8 @@ def get_fine_lines(fine_segment,line_positions,line_labels,position,save_patches
 
         if lines is not None:
 
-            theta_offset = np.mean(lines[:,0,1])
-            rho_offset = np.mean(lines[:,0,0])
+            theta_offset = np.mean(lines[:,:,1])
+            rho_offset = np.mean(lines[:,:,0])
             # Rotate Line by 90 CC (x,y) -> (-y,x)     y = -(cos(t)/sin(t)) x + (rho/sin(t)) -> y = (sin(t)/cos(t)) x - (rho/cos(t))
             m2 = np.sin(theta_offset)/np.cos(theta_offset)
             b2 = - rho_offset/np.cos(theta_offset)
@@ -608,19 +632,17 @@ def infer_measure(image,dets,save_img=False,fd=None,save_patches=False,save_thre
     elif seconds == -2:
         seconds = t.tensor(0)
     elif seconds == 60:
-        # mins +=1
         seconds = t.tensor(0)
 
-    # hours,mins,seconds = 0,0,0
     if save_img:
         image = cv.cvtColor(image,cv.COLOR_GRAY2BGR)
         
-        image = draw_boundary_line(image,boundary_line)    
+        image = draw_boundary_line(image,boundary_line)
         # image = draw_patch_boxes(image,coarse_boxes,fine_boxes,numeral_positions,boundary_line[1])     
         image = draw_boxes(image,coarse_boxes)
-        # image = draw_boxes(image,fine_boxes)
-        image = draw_vert_lines(image,coarse_lines,numeral_positions,col=(255,0,0))
-        image = draw_vert_lines(image,fine_lines,numeral_positions,col=(0,0,255))
+        image = draw_boxes(image,fine_boxes)
+        # image = draw_vert_lines(image,coarse_lines,numeral_positions,col=(255,0,0))
+        # # image = draw_vert_lines(image,fine_lines,numeral_positions,col=(0,0,255))
         image = draw_fine_points(image,fine_points)
         image = draw_coarse_points(image,coarse_points)
         verify_points(t.clone(coarse_points),t.clone(fine_points))

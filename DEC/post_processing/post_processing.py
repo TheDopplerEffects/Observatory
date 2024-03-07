@@ -3,8 +3,7 @@ import torch as t
 import cv2 as cv
 import math
 import timeit
-
-from post_processing.error_checking import *
+from time import perf_counter
 from config.config import *
 from post_processing.utils import *
 
@@ -18,10 +17,10 @@ def post_process_boxes(boxes,boundary,conf=0.6):
     assert boxes is not None, 'Box Post Processing Error: No Boxes Detected'
     fine_boxes = None
     coarse_boxes = None
-    
+
     # Filter Based on Region Boundary and Remove A or B Label
     for i,box in enumerate(boxes):
-        if box[-1] != 5 and box[-1] != 3 and box[4].item() >= conf and (box[2] - box[0]) * (box[3] - box[1]) > MIN_BOX_SIZE: # Remove A and B Labels, Detections Below Confidence Threshold and Small Bounding Boxes
+        if box[-1] != 5 and box[-1] != 3 and box[4].item() >= conf*100 and (box[2] - box[0]) * (box[3] - box[1]) > MIN_BOX_SIZE: # Remove A and B Labels, Detections Below Confidence Threshold and Small Bounding Boxes
             if box[0] > XDIM*(DIST_FROM_EDGE) and box[2] < XDIM*(1-DIST_FROM_EDGE): # Removes Boxes too close to edge which are likely to be misdetected
                 if box[1] > boundary:
                     if fine_boxes is None:
@@ -44,13 +43,14 @@ def post_process_boxes(boxes,boundary,conf=0.6):
     sort = t.sort(coarse_boxes[:,0],descending=False)
     coarse_boxes_sorted = coarse_boxes[sort.indices]
 
-    # Get Appox Numeral Lines
-    fine_y_position = t.sum(fine_boxes_sorted[:,1])/len(fine_boxes_sorted[:,1])
-    coarse_y_position = t.sum(coarse_boxes_sorted[:,3])/len(coarse_boxes_sorted[:,3])
-
+    # Get Numeral Lines Positions
+    fine_y_position = t.min(fine_boxes_sorted[:,1])
+    coarse_y_position = t.max(coarse_boxes_sorted[:,3])
+    
     assert fine_boxes_sorted is not None, 'Dectection Grouping Error: Sorted Fine Boxes Emtpy'
     assert coarse_boxes_sorted is not None, 'Dectection Grouping Error: Sorted Coarse Boxes Emtpy'
-    
+
+    assert len(coarse_boxes_sorted) > 1, f'Only One Coarse Box Detected' 
     return fine_boxes_sorted,coarse_boxes_sorted, (fine_y_position,coarse_y_position)
 
 def split_image(img,numeral_positions,save_thresh=False,fd=None):
@@ -62,18 +62,20 @@ def split_image(img,numeral_positions,save_thresh=False,fd=None):
     """
     # Crop Image Between Detected Objects to Reduce size of HoughLine image
     fine_pos = int(numeral_positions[0])
-    coarse_pos = int(numeral_positions[1]) 
+    coarse_pos = int(numeral_positions[1])
     cropped_img = img[coarse_pos:fine_pos,:]
 
+    cv.imwrite('cropped.png',cropped_img)
     # Filter, Threshold and Houghlines
     edge_map = cv.Sobel(cropped_img,cv.CV_8U,0,VS_DY,ksize=VS_KERNEL)
     _ , yThresh = cv.threshold(edge_map,0,255,cv.THRESH_BINARY + cv.THRESH_OTSU)
 
     # Debugging option to save images
     if save_thresh:
-        cv.imwrite(f'images/{fd}_edge.png',edge_map)
-        cv.imwrite(f'images/{fd}_yThresh',yThresh)
+        cv.imwrite(f'images/{fd[:-4]}_edge.png',edge_map)
+        cv.imwrite(f'images/{fd[:-4]}_yThresh.png',yThresh)
         
+    
     lines = cv.HoughLines(yThresh, SEGMENT_RHO_RES, SEGMENT_THETA_RES, SEGMENT_VOTE_RES, None, 0, 0, np.pi/2 - YTOL, np.pi/2 + YTOL)
 
     assert lines is not None, 'Image Split Error: No Boundary Lines Detected'
@@ -88,6 +90,18 @@ def split_image(img,numeral_positions,save_thresh=False,fd=None):
     center = round(img.shape[1]//2 * m + b)
     boundary_edge = round(center + coarse_pos)
     boundary_line = [m,b + coarse_pos]
+    
+    # pt1 = (0,int(m*0 + b))
+    # pt2 = (int(XDIM),int(m*XDIM + b))
+
+    # cropped_img = cv2.cvtColor(cropped_img,cv.COLOR_GRAY2BGR)
+    # yThresh = cv2.cvtColor(yThresh,cv.COLOR_GRAY2BGR)
+    # edge_map = cv2.cvtColor(edge_map,cv.COLOR_GRAY2BGR)
+    
+    # cv2.line(yThresh,pt1,pt2,(0,255,0),1) 
+    # border = np.ones((20,img.shape[1],3))*255
+    # stacked = np.concatenate((cropped_img,border,edge_map,border,yThresh))
+    # cv.imwrite(f'DEC_segments_{VS_DY}.png',stacked)
     
     return img[coarse_pos:boundary_edge],img[boundary_edge:fine_pos],boundary_line
 
@@ -194,8 +208,8 @@ def get_coarse_lines(coarse_segment,line_positions,line_labels,position,save_pat
         if lines is not None:
             
             # Average all line detections together
-            theta_offset = np.mean(lines[:,0,1])
-            rho_offset = np.mean(lines[:,0,0])
+            theta_offset = np.mean(lines[:,:,1])
+            rho_offset = np.mean(lines[:,:,0])
 
             # Rotate Line by 90 CC (x,y) -> (-y,x)     y = -(cos(t)/sin(t)) x + (rho/sin(t)) -> y = (sin(t)/cos(t)) x - (rho/cos(t))
             m2 = np.sin(theta_offset)/np.cos(theta_offset)
@@ -291,9 +305,10 @@ def get_fine_lines(fine_segment,line_positions,line_labels,position,save_patches
         if lines is not None:
 
             # Average detected lines together
-            theta_offset = np.mean(lines[:,0,1])
-            rho_offset = np.mean(lines[:,0,0])
-
+            theta_offset = np.mean(lines[:,:,1])
+            rho_offset = np.mean(lines[:,:,0])
+            # theta_offset = lines[0,0,1]
+            # rho_offset = lines[0,0,0]
             # Rotate Line by 90 CC (x,y) -> (-y,x)     y = -(cos(t)/sin(t)) x + (rho/sin(t)) -> y = (sin(t)/cos(t)) x - (rho/cos(t))
             m2 = np.sin(theta_offset)/np.cos(theta_offset)
             b2 = -rho_offset/np.cos(theta_offset)
@@ -428,8 +443,8 @@ def measure_degree_mins(coarse_points,fine_points):
 
 def measure_seconds(coarse_points,fine_points,increasing):
 
-    coarse_x_positions = coarse_points[:,1]
-    fine_x_positions = fine_points[:,1]
+    coarse_x_positions = coarse_points[:,0]
+    fine_x_positions = fine_points[:,0]
 
     diff_matrix = t.abs(coarse_x_positions.unsqueeze(1) - fine_x_positions)
     min_0,index_0 = t.min(diff_matrix,1)
@@ -450,8 +465,8 @@ def measure_seconds(coarse_points,fine_points,increasing):
 
 
 def infer_measure(image,dets,save_img=False,fd=None,save_patches=False,save_thresh=False):
-    fine_boxes,coarse_boxes,numeral_positions = post_process_boxes(dets,YDIM/2,CONF_THRESH)
-    # extend_left,extend_right = verify_boxes(fine_boxes,coarse_boxes)
+    fine_boxes,coarse_boxes,numeral_positions = post_process_boxes(dets,image.shape[0]/2,CONF_THRESH)
+
     coarse_segment, fine_segment, boundary_line = split_image(image,numeral_positions,save_thresh=save_thresh,fd=fd)
 
     coarse_line_positions,coarse_line_labels = get_coarse_line_positions(coarse_boxes)
@@ -470,13 +485,13 @@ def infer_measure(image,dets,save_img=False,fd=None,save_patches=False,save_thre
     fine_mins,seconds = measure_seconds(coarse_points,fine_points,decreasing)
 
     if save_img:
-        image = cv.cvtColor(image,cv.COLOR_GRAY2BGR)
+        # image = cv.cvtColor(image,cv.COLOR_GRAY2BGR)
         
-        image = draw_boundary_line(image,boundary_line)    
-        # image = draw_patch_boxes(image,coarse_boxes,fine_boxes,numeral_positions,boundary_line[1])     
+        image = draw_boundary_line(image,boundary_line)
         image = draw_boxes(image,coarse_boxes)
         image = draw_boxes(image,fine_boxes)
-        # image = draw_vert_lines(image,coarse_lines,numeral_positions,col=(255,0,0))
+        image = draw_vert_lines(image,coarse_lines,numeral_positions,col=(255,0,0))
+        
         # image = draw_vert_lines(image,fine_lines,numeral_positions,col=(0,0,255))
         image = draw_fine_points(image,fine_points)
         image = draw_coarse_points(image,coarse_points)
