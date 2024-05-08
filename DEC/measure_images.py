@@ -221,11 +221,11 @@ def evaluate(measurements,ground_truth):
     print(result)
 
 if __name__ == '__main__':
-    path = ''
-    impath = ''
-    lblpath = ''
-    lbl_src = 'dets'
-    
+    path = '/home/tim/Documents/Datasets/VernierImages/DEC/DecSplits/test/'
+    impath = '/home/tim/Documents/Datasets/VernierImages/DEC/DecSplits/test/images/'
+    lblpath = '/home/tim/ssd/Projects/VernierBaseline/DEC/results_ext/'
+    lbl_src = 'base'
+
     gt = get_gt_measurements(path)
     images = get_images(impath)
     if lbl_src == 'gt':

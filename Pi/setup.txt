@@ -1,0 +1,7 @@
+Install Ubuntu 22.0.4 on Pi
+
+Install FLIR Spinnaker SDK and SpinView
+https://www.flir.ca/products/spinnaker-sdk/?vertical=machine+vision&segment=iis
+
+Install Aravis, see aravis.txt
+

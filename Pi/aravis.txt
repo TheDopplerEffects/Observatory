@@ -1,0 +1,46 @@
+https://www.flir.ca/support-center/iis/machine-vision/application-note/using-the-aravis-gstreamer-source-plug-in/
+
+install newest version of meson using python3 pip
+install newest version of ninja
+
+$ sudo apt-get install libgstreamer1.0-0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav gstreamer1.0-doc gstreamer1.0-tools gstreamer1.0-x gstreamer1.0-alsa gstreamer1.0-gl gstreamer1.0-gtk3 gstreamer1.0-qt5 gstreamer1.0-pulseaudio
+
+$ python3 -m pip install meson==1.4.0
+
+$ sudo apt-get install ninja-build
+
+$ sudo apt-get install libgstreamer-plugins-base1.0-dev libnotify-dev intltool build-essential libgtk-3-dev gtk-doc-tools  libusb-1.0-0-dev libxml2-dev 
+
+https://github.com/AravisProject/aravis/releases
+Download 0.8.10
+
+$ cd aravis-0.8.10
+
+$ meson build
+$ cd build
+$ ninja
+$ sudo ninja install
+
+$ sudo ldconfig
+
+$ vim ~/.bashrc 
+
+Add 
+export GST_PLUGIN_PATH=$GST_PLUGIN_PATH:/usr/local/lib/aarch64-linux-gnu/gstreamer-1.0
+
+Verify with arv-viewer-0.8
+
+FOR USB3
+
+Add Aravis rules to your udev rules: 
+Download: aravis.rules from https://github.com/AravisProject/aravis/blob/master/src/aravis.rules
+Move this file to: /etc/udev/rules.d/
+Restart your computer to ensure the rules are refreshed
+Once restarted re-export the GST_PLUGIN_PATH variable
+Try to stream images from your camera using the Aravis viewer:
+
+Verify
+$ gst-launch-1.0 aravissrc ! videoconvert ! xvimagesink -v
+
+RSTP stream
+$ gst-launch-1.0 aravissrc ! video/x-raw, width=960, height=720, framerate=10/1 ! videoconvert ! x264enc ! rtph264pay pt=96 name=pay0 config-interval=1 ! udpsink host=<ip address of the client> port=5555 -e

@@ -86,7 +86,7 @@ def evaluate(detections,ground_truth):
 if __name__ == '__main__':
     path = '/home/tim/Documents/Datasets/VernierImages/RA/yolo/RAScaleMeasure/'
     # lblpath = '/home/tim/Documents/Datasets/VernierImages/RA/yolo/RAScaleMeasure/labels/'
-    lbl_src = 'gt'
+    lbl_src = 'base'
     # lblpath = '/ssd/Models/YOLOv6/runs/inference/yolov6m_RA_V3/labels/'
     lblpath = '/ssd/Projects/VernierBaseline/RA/results_80/'
     fds = os.listdir(path + 'images/')
@@ -101,7 +101,7 @@ if __name__ == '__main__':
     for i,measure in enumerate(labels):
         gt[f'{i}.png'] = measure
     intervals = []
-    fds = ['0.png']
+    # fds = ['0.png']
     for fd in fds:
         dets = []
         image = cv.imread(path + 'images/' + fd,cv.IMREAD_GRAYSCALE)

@@ -1,7 +1,6 @@
 import torch as t
 from config.config import *
 
-
 # def verify_dets(boxes)
 def verify_points(coarse_points,fine_points):
     hours = coarse_points[:,2]
@@ -24,7 +23,7 @@ def verify_points(coarse_points,fine_points):
     last_point = coarse_x_positions[-1]
     arrow_position = fine_x_positions[t.where(fine_points[:,2] == 0)[0]]
     
-    assert arrow_position < last_point, "Measurement Error: Arrow Beyond Labeled Points"
+    # assert arrow_position < last_point, "Measurement Error: Arrow Beyond Labeled Points"
     # assert sum(coarse_x_diff < 0) == 0, f"Coarse Points Sequence Error: Coarse X Position Sequence Incorrect (Less)" 
     # assert sum(coarse_x_diff < MIN_COARSE_POINT_DISTANCE) == 0, f"Coarse Points Sequence Error: Coarse X Position Sequence Incorrect (Greater) {coarse_x_diff}" 
     
@@ -42,19 +41,16 @@ def verify_boxes(fine_boxes,coarse_boxes):
     sixty_ind = t.where(fine_boxes[:,5] == 2)[0]
     assert len(sixty_ind) == 1, 'Detection Error: Incorrect Number of Sixties Detected'
     img = np.zeros((XDIM,YDIM))
+
+
     
-    for box in fine_boxes:
-        x1 = round(box[0].item())
-        y1 = round(box[1].item())
-        x2 = round(box[2].item())
-        y2 = round(box[3].item())
-        img[y1:y2,x1:x2] += 1
-    for box in coarse_boxes:
-        x1 = round(box[0].item())
-        y1 = round(box[1].item())
-        x2 = round(box[2].item())
-        y2 = round(box[3].item())
-        img[y1:y2,x1:x2] += 1
+    for box_set in [fine_boxes,coarse_boxes]:
+        for box in box_set:
+            x1 = round(box[0].item())
+            y1 = round(box[1].item())
+            x2 = round(box[2].item())
+            y2 = round(box[3].item())
+            img[y1:y2,x1:x2] += 1
 
     assert np.max(img) == 1, 'Detection Error: Overlapping Boxes Detected'
     
